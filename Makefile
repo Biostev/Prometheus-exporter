@@ -17,7 +17,7 @@ help:
 	echo "  make setup-ovs    - Open vSwitch download"
 	echo "  make clean    - Delete created env"
 
-install: setup-python setup-ovs setup-mininet setup-prometheus setup-ryu test
+install: setup-python setup-ovs setup-mininet setup-ryu
 	echo "Everything downloaded!"
 
 setup-python:
@@ -35,6 +35,7 @@ setup-ryu:
 	$(PIP) install --upgrade pip
 	$(PIP) install setuptools==59.6.0 wheel
 	$(PIP) install dnspython==1.16.0
+	$(PIP) install eventlet==0.30.2
 	$(PIP) install ryu==4.34
 	$(RYU_MANAGER) --version
 	echo "Ryu installed"
