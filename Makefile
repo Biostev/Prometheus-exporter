@@ -1,4 +1,4 @@
-.PHONY: help install clean setup-python setup-ryu setup-mininet setup-ovs
+.PHONY: help install clean setup-python setup-os-ken setup-mininet setup-ovs
 
 PYTHON_VERSION = 3.8
 VENV_DIR = $(HOME)/ryu-env
@@ -6,18 +6,19 @@ RYU_DIR = $(HOME)/ryu
 PROJECT_DIR = $(shell pwd)
 PIP = $(VENV_DIR)/bin/pip
 PYTHON = $(VENV_DIR)/bin/python
-RYU_MANAGER = $(VENV_DIR)/bin/ryu-manager
+OSKEN_MANAGER = $(VENV_DIR)/bin/osken-manager
 
 help:
 	echo "Commands:"
-	echo "  make install      - Install all dependencies"
-	echo "  make setup-python - Python $(PYTHON_VERSION) download"
-	echo "  make setup-ryu    - Install Ryu into env"
-	echo "  make setup-mininet - Mininet download"
-	echo "  make setup-ovs    - Open vSwitch download"
-	echo "  make clean    - Delete created env"
+	echo "  make install		- Install all dependencies"
+	echo "  make setup-python	- Python $(PYTHON_VERSION) download"
+	echo "  make setup-ryu		- Install os-ken into env"
+	echo "  make setup-mininet	- Mininet download"
+	echo "  make setup-ovs		- Open vSwitch download"
+	echo "  make clean		- Delete created env"
+	echo "  start-mininet		- create topology with 1 vSwitch and 2 hosts"
 
-install: setup-python setup-ovs setup-mininet setup-ryu
+install: setup-python setup-ovs setup-mininet setup-os-ken
 	echo "Everything downloaded!"
 
 setup-python:
@@ -29,16 +30,16 @@ setup-python:
 	curl -sS https://bootstrap.pypa.io/pip/$(PYTHON_VERSION)/get-pip.py | python$(PYTHON_VERSION)
 	echo "Python $(PYTHON_VERSION) downloaded with pip"
 
-setup-ryu:
-	echo "Installing Ruy into env..."
+setup-os-ken:
+	echo "Installing os-ken into env..."
 	test -d $(VENV_DIR) || python$(PYTHON_VERSION) -m venv $(VENV_DIR)
 	$(PIP) install --upgrade pip
 	$(PIP) install setuptools==59.6.0 wheel
 	$(PIP) install dnspython==1.16.0
 	$(PIP) install eventlet==0.30.2
-	$(PIP) install ryu==4.34
-	$(RYU_MANAGER) --version
-	echo "Ryu installed"
+	$(PIP) install os-ken
+	$(OSKEN_MANAGER) --version
+	echo "os-ken installed"
 
 setup-ovs:
 	echo "Downloading Open vSwitch..."
@@ -58,3 +59,10 @@ clean:
 	echo "Cleaning..."
 	rm -rf $(VENV_DIR)
 	echo "env deleted"
+
+start-mininet:
+	echo "starting topology"
+	sudo mn --topo=single,2 \
+		--controller=remote,ip=127.0.0.1,port=6633 \
+		--switch=ovsk,protocols=OpenFlow13
+
