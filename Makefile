@@ -1,4 +1,4 @@
-.PHONY: help install clean setup-python setup-os-ken setup-mininet setup-ovs
+.PHONY: help install clean setup-python setup-os-ken setup-mininet setup-ovs setup-prometheus-client
 
 PYTHON_VERSION = 3.8
 VENV_DIR = $(HOME)/ryu-env
@@ -10,15 +10,16 @@ OSKEN_MANAGER = $(VENV_DIR)/bin/osken-manager
 
 help:
 	echo "Commands:"
-	echo "  make install		- Install all dependencies"
-	echo "  make setup-python	- Python $(PYTHON_VERSION) download"
-	echo "  make setup-ryu		- Install os-ken into env"
-	echo "  make setup-mininet	- Mininet download"
-	echo "  make setup-ovs		- Open vSwitch download"
-	echo "  make clean		- Delete created env"
-	echo "  start-mininet		- create topology with 1 vSwitch and 2 hosts"
+	echo "  make install			- Install all dependencies"
+	echo "  make setup-python		- Python $(PYTHON_VERSION) download"
+	echo "  make setup-ryu			- Install os-ken into env"
+	echo "  make setup-mininet		- Mininet download"
+	echo "  make setup-ovs			- Open vSwitch download"
+	echo "  make setup-prometheus-client	- Install prometheus-client into env"
+	echo "  make clean			- Delete created env"
+	echo "  start-mininet			- create topology with 1 vSwitch and 2 hosts"
 
-install: setup-python setup-ovs setup-mininet setup-os-ken
+install: setup-python setup-ovs setup-mininet setup-os-ken setup-prometheus-client
 	echo "Everything downloaded!"
 
 setup-python:
@@ -40,6 +41,13 @@ setup-os-ken:
 	$(PIP) install os-ken
 	$(OSKEN_MANAGER) --version
 	echo "os-ken installed"
+
+setup-prometheus-client:
+	echo "Installing prometheus-client into env..."
+	test -d $(VENV_DIR) || python$(PYTHON_VERSION) -m venv $(VENV_DIR)
+	$(PIP) install --upgrade pip
+	$(PIP) install prometheus-client
+	echo "prometheus-client installed"
 
 setup-ovs:
 	echo "Downloading Open vSwitch..."
