@@ -255,7 +255,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
         # Initialize MAC table for the switch
         self.mac_to_port.setdefault(dpid, {})
 
-        self.logger.info("packet in %s %s %s %s", dpid, str, dst, in_port)
+        self.logger.debug("packet in %s %s %s %s", dpid, str, dst, in_port)
 
         # Learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port

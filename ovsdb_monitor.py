@@ -225,6 +225,8 @@ class OVSDBMonitor:
             if key in self._counter_cache.keys():
                 delta = val - self._counter_cache[key]
                 metric.labels(switch_id=dpid, port_name=port_name).inc(delta)
+            else:
+                metric.labels(switch_id=dpid, port_name=port_name).inc(val)
             self._counter_cache[key] = val
 
         # RX/TX packets and bytes
