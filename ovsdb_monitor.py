@@ -168,6 +168,12 @@ class OVSDBMonitor:
         # TX packets
         inc(self.metrics.tx_count, 'tx', stats.get('tx_packets'))
         
+        # RX bytes
+        inc(self.metrics.port_rx_bytes, 'rx', stats.get('rx_bytes'))
+        
+        # TX bytes
+        inc(self.metrics.port_tx_bytes, 'tx', stats.get('tx_bytes'))
+        
         # RX errors (сумма)
         rx_err = (
             int(stats.get('rx_errors', 0)) +

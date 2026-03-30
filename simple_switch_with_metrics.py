@@ -1,11 +1,15 @@
 from os_ken.base import app_manager
 from os_ken.controller import ofp_event
-from os_ken.controller.handler import CONFIG_DISPATCHER, MAIN_DISPATCHER
-from os_ken.controller.handler import set_ev_cls
+from os_ken.controller.handler import (
+    CONFIG_DISPATCHER, MAIN_DISPATCHER,
+    set_ev_cls
+)
+from os_ken.controller.controller import Datapath
+from os_ken.controller import event
 from os_ken.ofproto import ofproto_v1_3
-from os_ken.lib.packet import packet
-from os_ken.lib.packet import ethernet
-from os_ken.lib.packet import ether_types
+from os_ken.lib.packet import (
+    packet, ethernet, ether_types,
+)
 from os_ken.lib import hub
 
 import time
@@ -21,7 +25,9 @@ class SimpleSwitch13(app_manager.OSKenApp):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
         self.datapaths = {}
-        self.stats_interval = 10
+        self.stats_interval = 5
+        self.current_active_tables = set()
+        self.previous_flow_count = {}
 
         # Initialize metrics exporter
         self.metrics = MetricsExporter(port=8000)
@@ -43,11 +49,19 @@ class SimpleSwitch13(app_manager.OSKenApp):
     def _send_periodic_stats(self):
         while True:
             hub.sleep(self.stats_interval)
-            for datapath in self.datapaths.values():
-                if datapath:
+            active_count = 0
+            for dpid, datapath in list(self.datapaths.items()):
+                if datapath and hasattr(datapath, 'is_active') and datapath.is_active:
+                    active_count += 1
                     self._request_flow_stats(datapath)
                     self._request_table_stats(datapath)
                     self._request_table_features(datapath)
+                else:
+                    if dpid in self.datapaths:
+                        del self.datapaths[dpid]
+                        self.logger.info(f"Switch {dpid} disconnected (is_active=False)")
+            
+            self.metrics.active_connections.set(active_count)
     
     def _request_flow_stats(self, datapath):
         parser = datapath.ofproto_parser
@@ -95,7 +109,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
         self.datapaths[dpid] = datapath
 
         # Update active connections metric
-        self.metrics.active_connections.labels(switch_id=str(dpid)).set(1)
+        self.metrics.active_connections.inc()
         self.logger.info(f"Switch {dpid} connected")
 
         # install table-miss flow entry
@@ -106,7 +120,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
         )]
         self.add_flow(datapath, 0, match, actions)
 
-    def add_flow(self, datapath, priority, match, actions, buffer_id=None):
+    def add_flow(self, datapath, priority, match, actions, buffer_id=None, idle_timeout=20):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
 
@@ -119,6 +133,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
             ofproto.OFPIT_APPLY_ACTIONS,
             actions,
         )]
+        flags = ofproto.OFPFF_SEND_FLOW_REM
         if buffer_id is not None:
             mod = parser.OFPFlowMod(
                 datapath=datapath,
@@ -126,6 +141,8 @@ class SimpleSwitch13(app_manager.OSKenApp):
                 priority=priority,
                 match=match,
                 instructions=inst,
+                flags=flags,
+                idle_timeout=idle_timeout,
             )
         else:
             mod = parser.OFPFlowMod(
@@ -133,7 +150,9 @@ class SimpleSwitch13(app_manager.OSKenApp):
                 priority=priority,
                 match=match,
                 instructions=inst,
-        )
+                flags=flags,
+                idle_timeout=idle_timeout,
+            )
         datapath.send_msg(mod)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -215,40 +234,22 @@ class SimpleSwitch13(app_manager.OSKenApp):
         
         self.logger.warning(f"OpenFlow error: switch={dpid} type={msg.type}")
     
-    @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
-    def flow_removed_handler(self, ev):
+    @set_ev_cls(ofp_event.EventOFPFlowStatsReply, MAIN_DISPATCHER)
+    def flow_stats_reply_handler(self, ev):
+        """Handle flow stats reply."""
         msg = ev.msg
         datapath = msg.datapath
         dpid = str(datapath.id)
         
-        # Increment expired flows counter
-        self.metrics.expired_flows_count.labels(switch_id=dpid).inc()
+        self.logger.debug(f"Received flow stats reply from switch {dpid}")
         
-        self.logger.debug(f"Flow removed: switch={dpid} reason={msg.reason}")
-    
-    @set_ev_cls(ofp_event.EventOFPStatsReply, MAIN_DISPATCHER)
-    def stats_reply_handler(self, ev):
-        msg = ev.msg
-        datapath = msg.datapath
-        dpid = str(datapath.id)
-
         # Increment StatsReply counter
         self.metrics.stats_reply_count.labels(switch_id=dpid).inc()
-    
-        if not msg.body:
-            return
-
-        stat_type = type(msg.body[0]).__name__
-        self.logger.debug(f"Recieved {stat_type} from switch {dpid}")
-
-        if stat_type == 'OFPFlowStats':
+        
+        if msg.body:
             self._handle_flow_stats(dpid, msg.body)
-        elif stat_type == 'OFPTableStats':
-            self._handle_table_stats(dpid, msg.body)
-        elif stat_type == 'OFPTableFeaturesStats':
-            self._handle_table_features_stats(dpid, msg.body)
         else:
-            self.logger.warning(f"Unknown stats type {stat_type} from switch {dpid}")
+            self._handle_flow_stats(dpid, [])
 
     def _handle_flow_stats(self, dpid, body):
         flows_per_table = {}
@@ -257,6 +258,16 @@ class SimpleSwitch13(app_manager.OSKenApp):
             table_id = stat.table_id
             flows_per_table[table_id] = flows_per_table.get(table_id, 0) + 1
         
+        current_total = sum(flows_per_table.values())
+        previous_total = self.previous_flow_count.get(dpid, 0)
+        if current_total < previous_total:
+            expired = previous_total - current_total
+            self.metrics.expired_flows_count.labels(
+                switch_id=dpid
+            ).inc(expired)
+            self.logger.info(f"Detected {expired} expired/removed flows on switch {dpid}")
+        self.previous_flow_count[dpid] = current_total
+
         for table_id, count in flows_per_table.items():
             # Set current number of flows for tables
             self.metrics.flows_count.labels(
@@ -264,24 +275,59 @@ class SimpleSwitch13(app_manager.OSKenApp):
                 table_id=table_id
             ).set(count)
     
+    @set_ev_cls(ofp_event.EventOFPTableStatsReply, MAIN_DISPATCHER)
+    def table_stats_reply_handler(self, ev):
+        """Handle table stats reply."""
+        msg = ev.msg
+        datapath = msg.datapath
+        dpid = str(datapath.id)
+        
+        self.logger.debug(f"Received table stats reply from switch {dpid}")
+        
+        # Increment StatsReply counter
+        self.metrics.stats_reply_count.labels(switch_id=dpid).inc()
+        
+        if msg.body:
+            self._handle_table_stats(dpid, msg.body)
+
     def _handle_table_stats(self, dpid, body):
         for stat in body:
             table_id = stat.table_id
             active_count = stat.active_count
             
             # Set current table size
-            self.metrics.cur_table_size.labels(
-                switch_id=dpid,
-                table_id=table_id
-            ).set(active_count)
+            if active_count > 0 or table_id == 0:
+                self.current_active_tables.add(table_id)
+                self.metrics.cur_table_size.labels(
+                    switch_id=dpid,
+                    table_id=table_id
+                ).set(active_count)
+            else:
+                self.current_active_tables.discard(table_id)
     
+    @set_ev_cls(ofp_event.EventOFPTableFeaturesStatsReply, MAIN_DISPATCHER)
+    def table_features_stats_reply_handler(self, ev):
+        """Handle table features stats reply."""
+        msg = ev.msg
+        datapath = msg.datapath
+        dpid = str(datapath.id)
+        
+        self.logger.debug(f"Received table features stats reply from switch {dpid}")
+        
+        # Increment StatsReply counter
+        self.metrics.stats_reply_count.labels(switch_id=dpid).inc()
+        
+        if msg.body:
+            self._handle_table_features_stats(dpid, msg.body)
+
     def _handle_table_features_stats(self, dpid, body):
         for stat in body:
             table_id = stat.table_id
             max_entries = stat.max_entries
             
             # Set capacities for tables
-            self.metrics.max_table_size.labels(
-                switch_id=dpid,
-                table_id=table_id
-            ).set(max_entries)
+            if table_id in self.current_active_tables:
+                self.metrics.max_table_size.labels(
+                    switch_id=dpid,
+                    table_id=table_id
+                ).set(max_entries)

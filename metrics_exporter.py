@@ -14,7 +14,6 @@ class MetricsExporter:
         self.active_connections = Gauge(
             'osken_active_connections',
             'Number of active datapath connections',
-            ['switch_id']
         )
 
         # OpenFlow msgs
@@ -110,14 +109,28 @@ class MetricsExporter:
         # Number of RX packets for port
         self.rx_count = Counter(
             'osken_port_rx_total',
-            'Total number recieved packets for port',
+            'Total number of recieved packets for port',
             ['switch_id', 'port_name']
         )
 
         # Number of TX packets for port
         self.tx_count = Counter(
             'osken_port_tx_total',
-            'Total number transmitted packets for port',
+            'Total number of transmitted packets for port',
+            ['switch_id', 'port_name']
+        )
+
+        # Number of RX bytes for port
+        self.port_rx_bytes = Counter(
+            'osken_port_rx_bytes_total',
+            'Total number of received bytes on port',
+            ['switch_id', 'port_name']
+        )
+
+        # Number of TX bytes for port
+        self.port_tx_bytes = Counter(
+            'osken_port_tx_bytes_total',
+            'Total number of transmitted bytes on port',
             ['switch_id', 'port_name']
         )
 
