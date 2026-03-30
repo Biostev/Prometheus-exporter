@@ -1,4 +1,4 @@
-.PHONY: help install clean setup-python setup-os-ken setup-mininet setup-ovs setup-prometheus-client
+.PHONY: help install clean setup-python setup-mininet setup-venv
 
 PYTHON_VERSION = 3.8
 VENV_DIR = $(HOME)/ryu-env
@@ -7,6 +7,7 @@ PROJECT_DIR = $(shell pwd)
 PIP = $(VENV_DIR)/bin/pip
 PYTHON = $(VENV_DIR)/bin/python
 OSKEN_MANAGER = $(VENV_DIR)/bin/osken-manager
+REQ_FILE = requirements.txt
 
 help:
 	echo "Commands:"
@@ -19,7 +20,7 @@ help:
 	echo "  make clean			- Delete created env"
 	echo "  start-mininet			- create topology with 1 vSwitch and 2 hosts"
 
-install: setup-python setup-ovs setup-mininet setup-os-ken setup-prometheus-client
+install: setup-python setup-mininet setup-venv
 	echo "Everything downloaded!"
 
 setup-python:
@@ -31,31 +32,11 @@ setup-python:
 	curl -sS https://bootstrap.pypa.io/pip/$(PYTHON_VERSION)/get-pip.py | python$(PYTHON_VERSION)
 	echo "Python $(PYTHON_VERSION) downloaded with pip"
 
-setup-os-ken:
-	echo "Installing os-ken into env..."
-	test -d $(VENV_DIR) || python$(PYTHON_VERSION) -m venv $(VENV_DIR)
+setup-venv:
+	echo "Installing python libs"
 	$(PIP) install --upgrade pip
-	$(PIP) install setuptools==59.6.0 wheel
-	$(PIP) install dnspython==1.16.0
-	$(PIP) install eventlet==0.30.2
-	$(PIP) install os-ken
-	$(OSKEN_MANAGER) --version
-	echo "os-ken installed"
-
-setup-prometheus-client:
-	echo "Installing prometheus-client into env..."
-	test -d $(VENV_DIR) || python$(PYTHON_VERSION) -m venv $(VENV_DIR)
-	$(PIP) install --upgrade pip
-	$(PIP) install prometheus-client
-	echo "prometheus-client installed"
-
-setup-ovs:
-	echo "Downloading Open vSwitch..."
-	sudo apt install -y openvswitch-switch openvswitch-common
-	sudo systemctl start openvswitch-switch
-	sudo systemctl enable openvswitch-switch
-	sudo ovs-vsctl --version
-	echo "Open vSwitch downloaded"
+	$(PIP) install -r $(REQ_FILE)
+	echo "Python dependencies installed"
 
 setup-mininet:
 	echo "Downloading Mininet..."

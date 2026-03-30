@@ -1,3 +1,28 @@
+"""
+Prometheus metrics exporter
+
+Creates http /metrics endpoint for returning metrics
+
+Provided metrics:
+ - active_connections
+ - packet_in_count
+ - packet_out_count
+ - stats_reply_count
+ - packet_in_processing_time
+ - error_msg_count
+ - flows_count
+ - expired_flows_count
+ - max_table_size
+ - cur_table_size
+ - port_status
+ - rx_count
+ - tx_count
+ - port_rx_bytes
+ - port_tx_bytes
+ - rx_errors
+ - tx_errors
+"""
+
 import threading
 import http.server
 from prometheus_client import (
@@ -6,7 +31,21 @@ from prometheus_client import (
 )
 
 class MetricsExporter:
+    """
+    Class for creating metrics with right pattern
+    """
     def __init__(self, config):
+        """
+        Initialized in switch
+        All requested metrics are set here
+
+        Config:
+        Type(
+            name,
+            description,
+            [labels]
+        )
+        """
         self.config = config
 
         # Connections
@@ -151,17 +190,30 @@ class MetricsExporter:
         self._start_http_server()
 
     def _start_http_server(self):
+        """
+        Creating /metrics endpoint using http.server pylib
+        server starts in a separate daemon thread
+        """
         class MetricsHandler(http.server.BaseHTTPRequestHandler):
+            """Simple class for handling http requests"""
             def do_GET(self):
+                """GET handler"""
+                # Set /metrics endpoint
                 if self.path == '/metrics':
                     self.send_response(200)
+                    # Prometheus uses text/plain format
                     self.send_header('Content-Type', 'text/plain')
                     self.end_headers()
                     self.wfile.write(generate_latest(REGISTRY))
+                # Set 404 for others
                 else:
                     self.send_response(404)
                     self.end_headers()
 
-        server = http.server.HTTPServer((self.config.METRICS_HOST, self.config.METRICS_PORT), MetricsHandler)
+        # Creating server in a daemon thread
+        server = http.server.HTTPServer(
+            (self.config.METRICS_HOST, self.config.METRICS_PORT),
+            MetricsHandler
+        )
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
