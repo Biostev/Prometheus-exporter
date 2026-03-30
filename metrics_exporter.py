@@ -6,8 +6,8 @@ from prometheus_client import (
 )
 
 class MetricsExporter:
-    def __init__(self, port=8000):
-        self.port = port
+    def __init__(self, config):
+        self.config = config
 
         # Connections
         # Number of active connections with switches
@@ -162,6 +162,6 @@ class MetricsExporter:
                     self.send_response(404)
                     self.end_headers()
 
-        server = http.server.HTTPServer(('0.0.0.0', self.port), MetricsHandler)
+        server = http.server.HTTPServer((self.config.METRICS_HOST, self.config.METRICS_PORT), MetricsHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()

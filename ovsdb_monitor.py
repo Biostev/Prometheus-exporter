@@ -6,7 +6,7 @@ from os_ken.lib import hub
 
 
 class OVSDBMonitor:
-    def __init__(self, metrics_exporter, logger, datapaths):
+    def __init__(self, metrics_exporter, logger, datapaths, config):
         self.metrics = metrics_exporter
         self.logger = logger
         self.datapaths = datapaths
@@ -16,11 +16,12 @@ class OVSDBMonitor:
         self.running = False
         self.connected = False
         self._counter_cache = {}
+        self.config = config
     
     def connect(self):
         try:
-            src_dir = os.getenv("OVS_SRCDIR", "/usr/share/openvswitch")
-            run_dir = os.getenv("OVS_RUNDIR", "/var/run/openvswitch")
+            src_dir = self.config.OVSDB_SRC_DIR
+            run_dir = self.config.OVSDB_RUN_DIR
             
             self.logger.info(f"OVSDB: src_dir={src_dir}, run_dir={run_dir}")
             
@@ -32,7 +33,7 @@ class OVSDBMonitor:
             schema_helper.register_all()
             
             self.idl = ovs_idl.Idl(remote, schema_helper)
-            self.conn = connection.Connection(idl=self.idl, timeout=10)
+            self.conn = connection.Connection(idl=self.idl, timeout=self.config.OVSDB_CONN_TIMEOUT)
             self.api = impl_idl.OvsdbIdl(self.conn)
             self.running = True
             hub.spawn(self._monitor_loop)
@@ -54,7 +55,7 @@ class OVSDBMonitor:
     
     def _monitor_loop(self):
         while self.running:
-            hub.sleep(5)
+            hub.sleep(self.config.OVSDB_STATS_INTERVAL)
             try:
                 self._update_metrics()
             except Exception as e:

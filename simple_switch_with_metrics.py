@@ -13,9 +13,11 @@ from os_ken.lib.packet import (
 from os_ken.lib import hub
 
 import time
+import logging
 
 from metrics_exporter import MetricsExporter
 from ovsdb_monitor import OVSDBMonitor
+from config import Config
 
 
 class SimpleSwitch13(app_manager.OSKenApp):
@@ -25,30 +27,33 @@ class SimpleSwitch13(app_manager.OSKenApp):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
         self.datapaths = {}
-        self.stats_interval = 5
         self.current_active_tables = set()
         self.previous_flow_count = {}
+        self.config = Config
+
+        logging.getLogger("os_ken").setLevel(self.config.LOG_LEVEL)
 
         # Initialize metrics exporter
-        self.metrics = MetricsExporter(port=8000)
+        self.metrics = MetricsExporter(self.config)
 
         self.ovsdb_monitor = OVSDBMonitor(
             self.metrics,
             self.logger,
             self.datapaths,
+            self.config,
         )
         
         if not self.ovsdb_monitor.connect():
             self.logger.warning("OVSDB connection error")
 
         self.logger.info("SimpleSwitch13 with Prometheus metrics started")
-        self.logger.info("Metrics available at http://localhost:8000/metrics")
+        self.logger.info(f"Metrics available at http://{self.config.METRICS_HOST}:{self.config.METRICS_PORT}/metrics")
         
         hub.spawn(self._send_periodic_stats)
     
     def _send_periodic_stats(self):
         while True:
-            hub.sleep(self.stats_interval)
+            hub.sleep(self.config.SWITCH_STATS_INTERVAL)
             active_count = 0
             for dpid, datapath in list(self.datapaths.items()):
                 if datapath and hasattr(datapath, 'is_active') and datapath.is_active:
