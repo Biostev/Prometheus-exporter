@@ -34,6 +34,7 @@ setup-python:
 
 setup-venv:
 	echo "Installing python libs"
+	$(VENV_DIR)/bin/activate
 	$(PIP) install --upgrade pip
 	$(PIP) install -r $(REQ_FILE)
 	echo "Python dependencies installed"
@@ -47,7 +48,7 @@ setup-mininet:
 clean:
 	echo "Cleaning..."
 	rm -rf $(VENV_DIR)
-	echo "env deleted"
+	echo "venv deleted"
 
 start-mininet:
 	echo "starting topology"

@@ -233,7 +233,6 @@ class OVSDBMonitor:
         inc(self.metrics.port_rx_bytes, 'rx', stats.get('rx_bytes'))
         inc(self.metrics.port_tx_bytes, 'tx', stats.get('tx_bytes'))
 
-        print("stats", stats)
         # RX errors (sum)
         rx_err = (
             int(stats.get('rx_errors', 0)) +
