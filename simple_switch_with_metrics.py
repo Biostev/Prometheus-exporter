@@ -11,6 +11,7 @@ from os_ken.lib import hub
 import time
 
 from metrics_exporter import MetricsExporter
+from ovsdb_monitor import OVSDBMonitor
 
 
 class SimpleSwitch13(app_manager.OSKenApp):
@@ -19,28 +20,69 @@ class SimpleSwitch13(app_manager.OSKenApp):
     def __init__(self, *args, **kwargs):
         super(SimpleSwitch13, self).__init__(*args, **kwargs)
         self.mac_to_port = {}
+        self.datapaths = {}
+        self.stats_interval = 10
 
         # Initialize metrics exporter
         self.metrics = MetricsExporter(port=8000)
 
-        # Track datapaths
-        self.datapaths = {}
+        self.ovsdb_monitor = OVSDBMonitor(
+            self.metrics,
+            self.logger,
+            self.datapaths,
+        )
+        
+        if not self.ovsdb_monitor.connect():
+            self.logger.warning("OVSDB connection error")
 
         self.logger.info("SimpleSwitch13 with Prometheus metrics started")
         self.logger.info("Metrics available at http://localhost:8000/metrics")
         
-        self.start_timer()
-    
-    def start_timer(self):
         hub.spawn(self._send_periodic_stats)
     
     def _send_periodic_stats(self):
         while True:
-            hub.sleep(10)
-            for dpid, datapath in self.datapaths.items():
-                if datapath.id in self.datapaths.items():
-                    self.send_stats_request(datapath, 'flow')
-                    self.send_stats_request(datapath, 'table')
+            hub.sleep(self.stats_interval)
+            for datapath in self.datapaths.values():
+                if datapath:
+                    self._request_flow_stats(datapath)
+                    self._request_table_stats(datapath)
+                    self._request_table_features(datapath)
+    
+    def _request_flow_stats(self, datapath):
+        parser = datapath.ofproto_parser
+        dpid = str(datapath.id)
+        
+        # Increment StatsRequest counter
+        self.metrics.stats_request_count.labels(switch_id=dpid).inc()
+        
+        req = parser.OFPFlowStatsRequest(
+            datapath=datapath,
+            table_id=ofproto_v1_3.OFPTT_ALL,
+            out_port=ofproto_v1_3.OFPP_ANY,
+            out_group=ofproto_v1_3.OFPG_ANY,
+        )
+        datapath.send_msg(req)
+
+    def _request_table_stats(self, datapath):
+        parser = datapath.ofproto_parser
+        dpid = str(datapath.id)
+        
+        # Increment StatsRequest counter
+        self.metrics.stats_request_count.labels(switch_id=dpid).inc()
+        
+        req = parser.OFPTableStatsRequest(datapath)
+        datapath.send_msg(req)
+
+    def _request_table_features(self, datapath):
+        parser = datapath.ofproto_parser
+        dpid = str(datapath.id)
+        
+        # Increment StatsRequest counter
+        self.metrics.stats_request_count.labels(switch_id=dpid).inc()
+        
+        req = parser.OFPTableFeaturesStatsRequest(datapath)
+        datapath.send_msg(req)
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -77,10 +119,11 @@ class SimpleSwitch13(app_manager.OSKenApp):
             ofproto.OFPIT_APPLY_ACTIONS,
             actions,
         )]
-        if buffer_id:
+        if buffer_id is not None:
             mod = parser.OFPFlowMod(
                 datapath=datapath,
                 buffer_id=buffer_id,
+                priority=priority,
                 match=match,
                 instructions=inst,
             )
@@ -90,26 +133,8 @@ class SimpleSwitch13(app_manager.OSKenApp):
                 priority=priority,
                 match=match,
                 instructions=inst,
-            )
-        datapath.send_msg(mod)
-    
-    def send_packet_out(self, datapath, buffer_id, in_port, actions, data=None):
-        ofproto = datapath.ofproto
-        parser = datapath.ofproto_parser
-
-        dpid = str(datapath.id)
-
-        # Increase PacketOut counter
-        self.metrics.packet_out_count.labels(switch_id=dpid).inc()
-
-        msg = parser.OFPPacketOut(
-            datapath=datapath,
-            buffer_id=buffer_id,
-            in_port=in_port,
-            actions=actions,
-            data=data,
         )
-        datapath.send_msg(msg)
+        datapath.send_msg(mod)
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def _packet_in_handler(self, ev):
@@ -125,7 +150,6 @@ class SimpleSwitch13(app_manager.OSKenApp):
         ofproto = datapath.ofproto
         parser = datapath.ofproto_parser
         in_port = msg.match['in_port']
-
         dpid = str(datapath.id)
 
         # Increase PacketIn counter
@@ -147,11 +171,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
         # learn a mac address to avoid FLOOD next time.
         self.mac_to_port[dpid][src] = in_port
 
-        if dst in self.mac_to_port[dpid]:
-            out_port = self.mac_to_port[dpid][dst]
-        else:
-            out_port = ofproto.OFPP_FLOOD
-
+        out_port = self.mac_to_port[dpid].get(dst, ofproto.OFPP_FLOOD)
         actions = [parser.OFPActionOutput(out_port)]
 
         # install a flow to avoid packet_in next time
@@ -170,7 +190,15 @@ class SimpleSwitch13(app_manager.OSKenApp):
         if msg.buffer_id == ofproto.OFP_NO_BUFFER:
             data = msg.data
         
-        self.send_packet_out(datapath, msg.buffer_id, in_port, actions, data)
+        self.metrics.packet_out_count.labels(switch_id=dpid).inc()
+        out = parser.OFPPacketOut(
+            datapath=datapath,
+            buffer_id=msg.buffer_id,
+            in_port=in_port,
+            actions=actions,
+            data=data,
+        )
+        datapath.send_msg(out)
 
         # Record processing time
         processing_time = time.perf_counter() - start_time
@@ -183,7 +211,7 @@ class SimpleSwitch13(app_manager.OSKenApp):
         dpid = str(datapath.id)
         
         # Increment error counter
-        self.metrics.error_msg_count.labels(switch_id=dpid).inc()
+        self.metrics.error_msg_count.labels(switch_id=dpid, error_type=msg.type).inc()
         
         self.logger.warning(f"OpenFlow error: switch={dpid} type={msg.type}")
     
@@ -207,41 +235,53 @@ class SimpleSwitch13(app_manager.OSKenApp):
         # Increment StatsReply counter
         self.metrics.stats_reply_count.labels(switch_id=dpid).inc()
     
-        for stat in msg.body:
-            port_no = stat.port_no
-            port_name = f"port_{port_no}"
-            
-            self.metrics.rx_count.labels(
-                switch_id=dpid, port_name=port_name
-            ).inc(stat.rx_packets)
-            
-            self.metrics.tx_count.labels(
-                switch_id=dpid, port_name=port_name
-            ).inc(stat.tx_packets)
-            
-            rx_errors = stat.rx_errors + stat.rx_dropped + stat.rx_over_errors + stat.rx_crc_errors
-            tx_errors = stat.tx_errors + stat.tx_dropped
-            
-            if rx_errors > 0:
-                self.metrics.rx_errors.labels(
-                    switch_id=dpid, port_name=port_name
-                ).inc(rx_errors)
-            
-            if tx_errors > 0:
-                self.metrics.tx_errors.labels(
-                    switch_id=dpid, port_name=port_name
-                ).inc(tx_errors)
+        if not msg.body:
+            return
+
+        stat_type = type(msg.body[0]).__name__
+        self.logger.debug(f"Recieved {stat_type} from switch {dpid}")
+
+        if stat_type == 'OFPFlowStats':
+            self._handle_flow_stats(dpid, msg.body)
+        elif stat_type == 'OFPTableStats':
+            self._handle_table_stats(dpid, msg.body)
+        elif stat_type == 'OFPTableFeaturesStats':
+            self._handle_table_features_stats(dpid, msg.body)
+        else:
+            self.logger.warning(f"Unknown stats type {stat_type} from switch {dpid}")
+
+    def _handle_flow_stats(self, dpid, body):
+        flows_per_table = {}
+        
+        for stat in body:
+            table_id = stat.table_id
+            flows_per_table[table_id] = flows_per_table.get(table_id, 0) + 1
+        
+        for table_id, count in flows_per_table.items():
+            # Set current number of flows for tables
+            self.metrics.flows_count.labels(
+                switch_id=dpid,
+                table_id=table_id
+            ).set(count)
     
-    def send_stats_request(self, datapath, stats_type='flow'):
-        parser = datapath.ofproto_parser
-        dpid = str(datapath.id)
-        
-        # Increment StatsRequest counter
-        self.metrics.stats_request_count.labels(switch_id=dpid).inc()
-        
-        if stats_type == 'flow':
-            req = parser.OFPFlowStatsRequest(datapath)
-            datapath.send_msg(req)
-        elif stats_type == 'table':
-            req = parser.OFPTableStatsRequest(datapath)
-            datapath.send_msg(req)
+    def _handle_table_stats(self, dpid, body):
+        for stat in body:
+            table_id = stat.table_id
+            active_count = stat.active_count
+            
+            # Set current table size
+            self.metrics.cur_table_size.labels(
+                switch_id=dpid,
+                table_id=table_id
+            ).set(active_count)
+    
+    def _handle_table_features_stats(self, dpid, body):
+        for stat in body:
+            table_id = stat.table_id
+            max_entries = stat.max_entries
+            
+            # Set capacities for tables
+            self.metrics.max_table_size.labels(
+                switch_id=dpid,
+                table_id=table_id
+            ).set(max_entries)

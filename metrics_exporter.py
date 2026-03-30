@@ -67,7 +67,7 @@ class MetricsExporter:
         self.error_msg_count = Counter(
             'osken_error_messages_total',
             'Total number of OpenFlow error messages',
-            ['switch_id']
+            ['switch_id', 'error_type']
         )
 
         # Flows
@@ -101,7 +101,7 @@ class MetricsExporter:
 
         # Ports
         # Current port status
-        self.purt_status = Gauge(
+        self.port_status = Gauge(
             'osken_port_status',
             'Port status (1 = up, 0 = down)',
             ['switch_id', 'port_name']
