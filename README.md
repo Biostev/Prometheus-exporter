@@ -45,10 +45,14 @@ For easy installation use Makefile. `help` option is provided.
 
 ### Controller
 
+Make sure that OVS socket file has right permissions.
+
 In created venv run:
 `osken-manager --ofp-tcp-listen-port 6633 simple_switch_with_metrics.py`
 
 ### Mininet
+
+There is `tests.py` file with implementation of 1 switch, 2 hosts topology and n switches k hosts each.
 
 In another terminal run:
 For 1 switch and 2 hosts:

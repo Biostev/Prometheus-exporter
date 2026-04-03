@@ -177,9 +177,9 @@ class OVSDBMonitor:
                         )
                         break
 
-                if link_state == 'up' or admin_state == 'up':
+                if link_state == 'up' and admin_state == 'up':
                     status_value = 1
-                elif link_state == 'down' or admin_state == 'down':
+                elif link_state == 'down' and admin_state == 'down':
                     status_value = 0
                 else:
                     status_value = 1
